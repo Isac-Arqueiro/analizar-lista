@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>📺 IPTV Analyzer - Simples</title>
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background: #1e1e2f;
+  color: #f1f1f1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px;
+}
+.container {
+  background: #2c2c3a;
+  border-radius: 10px;
+  padding: 30px;
+  width: 95%;
+  max-width: 700px;
+  text-align: center;
+}
+input[type="file"], input[type="text"] {
+  width: 90%;
+  padding: 10px;
+  margin: 10px 0;
+  border: none;
+  border-radius: 5px;
+}
+button {
+  background: #00b894;
+  border: none;
+  padding: 10px 20px;
+  color: #fff;
+  border-radius: 5px;
+  cursor: pointer;
+}
+button:hover { background: #019874; }
+.result {
+  background: #3a3a4d;
+  padding: 15px;
+  margin-top: 20px;
+  border-radius: 8px;
+  text-align: left;
+}
+.download-buttons a {
+  display: inline-block;
+  background: #0984e3;
+  color: white;
+  text-decoration: none;
+  margin: 5px;
+  padding: 8px 15px;
+  border-radius: 5px;
+}
+.download-buttons a:hover { background: #74b9ff; }
+.progress { margin-top: 15px; font-size: 15px; }
+</style>
+</head>
+<body>
+  <div class="container">
+    <h1>📺 IPTV Analyzer - HTML</h1>
+    <p>Envie sua lista .m3u / .m3u8 ou informe uma URL para verificar links.</p>
+
+    <input type="file" id="fileInput" accept=".m3u,.m3u8"><br>
+    <input type="text" id="urlInput" placeholder="http://exemplo.com/lista.m3u8"><br>
+    <button id="analyzeBtn">Analisar Lista</button>
+
+    <div id="progress" class="progress"></div>
+    <div id="result" class="result" style="display:none;"></div>
+  </div>
+
+<script>
+async function getListContent() {
+  const file = document.getElementById("fileInput").files[0];
+  const url = document.getElementById("urlInput").value.trim();
+  if (file) return await file.text();
+  if (url) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Falha ao carregar URL");
+      return await res.text();
+    } catch (err) {
+      alert("❌ Erro: " + err.message);
+      return "";
+    }
+  }
+  alert("Por favor, selecione um arquivo ou digite uma URL.");
+  return "";
+}
+
+function extractLinks(text) {
+  const regex = /(https?:\/\/[^\s]+)/g;
+  return [...new Set(text.match(regex) || [])];
+}
+
+async function checkLink(url, timeout = 5000) {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    const res = await fetch(url, { method: "HEAD", signal: controller.signal });
+    clearTimeout(timer);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function downloadList(name, links) {
+  const blob = new Blob([links.join("\n")], { type: "text/plain" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = name;
+  link.click();
+}
+
+document.getElementById("analyzeBtn").addEventListener("click", async () => {
+  const progress = document.getElementById("progress");
+  const result = document.getElementById("result");
+  result.style.display = "none";
+  progress.textContent = "⏳ Carregando lista...";
+
+  const content = await getListContent();
+  if (!content) return;
+
+  const links = extractLinks(content);
+  if (!links.length) {
+    progress.textContent = "❌ Nenhum link encontrado.";
+    return;
+  }
+
+  progress.textContent = `🔎 Verificando ${links.length} links...`;
+  const ativos = [];
+  const off = [];
+
+  // Limite simultâneo para não travar o navegador
+  const limit = 10; 
+  let index = 0;
+  async function nextBatch() {
+    const batch = links.slice(index, index + limit);
+    await Promise.all(batch.map(async (url) => {
+      const ok = await checkLink(url);
+      ok ? ativos.push(url) : off.push(url);
+      progress.textContent = `✅ Testado ${ativos.length + off.length} / ${links.length}`;
+    }));
+    index += limit;
+    if (index < links.length) await nextBatch();
+  }
+  await nextBatch();
+
+  progress.textContent = "✔️ Verificação concluída!";
+  result.style.display = "block";
+  result.innerHTML = `
+    <h2>Resultado</h2>
+    <p>Total de links: <b>${links.length}</b></p>
+    <p>❌ Off: <b>${ativos.length}</b></p>
+    <p>✅ Ativos: <b>${off.length}</b></p>
+    <div class="download-buttons">
+      <a href="#" id="baixarAtivos">⬇️ Baixar Ativos</a>
+      <a href="#" id="baixarOff">⬇️ Baixar Off</a>
+    </div>
+  `;
+  document.getElementById("baixarAtivos").onclick = () => downloadList("ativos.txt", ativos);
+  document.getElementById("baixarOff").onclick = () => downloadList("off.txt", off);
+});
+</script>
+</body>
+</html>
